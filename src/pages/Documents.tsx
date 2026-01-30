@@ -539,10 +539,12 @@ export default function Documents() {
                   <Scale className="h-4 w-4" />
                   Evaluations
                 </TabsTrigger>
+{/* Chat with Paper - Temporarily disabled
                 <TabsTrigger value="chat" className="gap-2">
                   <MessageSquare className="h-4 w-4" />
                   Chat
                 </TabsTrigger>
+*/}
                 <TabsTrigger value="feedback" className="gap-2">
                   <ClipboardEdit className="h-4 w-4" />
                   Feedback
@@ -553,7 +555,7 @@ export default function Documents() {
                 </TabsTrigger>
               </TabsList>
 
-              {/* Chat Tab */}
+{/* Chat Tab with PDF Viewer - Temporarily disabled
               <TabsContent value="chat" className="mt-4">
                 <div className="grid lg:grid-cols-2 gap-4">
                   <div className="space-y-4">
@@ -655,6 +657,7 @@ export default function Documents() {
                   </div>
                 </div>
               </TabsContent>
+*/}
 
               {/* Evaluations Tab */}
               <TabsContent value="evaluations" className="mt-4">
