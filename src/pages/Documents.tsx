@@ -84,11 +84,18 @@ export default function Documents() {
   const [evaluationData, setEvaluationData] = useState<any | null>(null);
   const [evaluationLoading, setEvaluationLoading] = useState(false);
   const [prompts, setPrompts] = useState<any | null>(null);
-  const [selectedPrompt, setSelectedPrompt] = useState<"pro" | "con" | "judge">(
-    "pro"
-  );
-  const [editedPrompt, setEditedPrompt] = useState<string>("");
-  const [promptModified, setPromptModified] = useState<boolean>(false);
+  // Multi-prompt editing state
+  const [editedPrompts, setEditedPrompts] = useState<{
+    pro: string;
+    con: string;
+    judge: string;
+  }>({ pro: '', con: '', judge: '' });
+  const [promptsModified, setPromptsModified] = useState<{
+    pro: boolean;
+    con: boolean;
+    judge: boolean;
+  }>({ pro: false, con: false, judge: false });
+  const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
   const [reEvaluating, setReEvaluating] = useState<boolean>(false);
   const [experimentResult, setExperimentResult] = useState<any | null>(null);
 
@@ -123,20 +130,19 @@ export default function Documents() {
       try {
         const data = await apiClient.getPrompts();
         setPrompts(data);
+        // Initialize edited prompts with loaded data
+        setEditedPrompts({
+          pro: data.pro || '',
+          con: data.con || '',
+          judge: data.judge || '',
+        });
+        setPromptsModified({ pro: false, con: false, judge: false });
       } catch (error: any) {
         console.error("Failed to load prompts:", error);
       }
     };
     loadPrompts();
   }, []);
-
-  // Update editedPrompt when selectedPrompt changes
-  useEffect(() => {
-    if (prompts?.[selectedPrompt]) {
-      setEditedPrompt(prompts[selectedPrompt]);
-      setPromptModified(false);
-    }
-  }, [selectedPrompt, prompts]);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -1061,76 +1067,208 @@ export default function Documents() {
                 </div>
               </TabsContent>
 
-              {/* Prompts Tab */}
+              {/* Prompts Tab - Multi-prompt editing */}
               <TabsContent value="prompts" className="mt-4">
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <Label>Select Prompt</Label>
-                      <Select
-                        value={selectedPrompt}
-                        onValueChange={(v) =>
-                          setSelectedPrompt(v as "pro" | "con" | "judge")
-                        }
-                      >
-                        <SelectTrigger className="mt-1">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pro">Pro Agent Prompt</SelectItem>
-                          <SelectItem value="con">Con Agent Prompt</SelectItem>
-                          <SelectItem value="judge">Judge Prompt</SelectItem>
-                        </SelectContent>
-                      </Select>
+                  {/* Summary of modifications */}
+                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm font-medium">Modified Prompts:</span>
+                      <div className="flex gap-2">
+                        {promptsModified.pro && (
+                          <Badge variant="default" className="bg-green-600">Pro</Badge>
+                        )}
+                        {promptsModified.con && (
+                          <Badge variant="destructive">Con</Badge>
+                        )}
+                        {promptsModified.judge && (
+                          <Badge variant="secondary">Judge</Badge>
+                        )}
+                        {!promptsModified.pro && !promptsModified.con && !promptsModified.judge && (
+                          <span className="text-sm text-muted-foreground">None</span>
+                        )}
+                      </div>
                     </div>
-                    {promptModified && (
-                      <Badge variant="secondary" className="ml-4">
-                        Modified
-                      </Badge>
-                    )}
+                    <span className="text-sm text-muted-foreground">
+                      {Object.values(promptsModified).filter(Boolean).length} of 3 prompts modified
+                    </span>
                   </div>
-                  <div>
-                    <Label>Prompt Content</Label>
-                    <Textarea
-                      className="mt-1 font-mono text-xs"
-                      rows={20}
-                      value={editedPrompt}
-                      onChange={(e) => {
-                        setEditedPrompt(e.target.value);
-                        setPromptModified(
-                          e.target.value !== prompts?.[selectedPrompt]
-                        );
-                      }}
-                      placeholder="Loading prompt..."
-                    />
-                  </div>
-                  <div className="flex gap-3">
+
+                  {/* Prompt Accordions */}
+                  <Accordion
+                    type="single"
+                    collapsible
+                    value={expandedPrompt || undefined}
+                    onValueChange={setExpandedPrompt}
+                    className="w-full"
+                  >
+                    {/* Pro Prompt */}
+                    <AccordionItem value="pro">
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center gap-3 w-full">
+                          <span className="font-medium">Pro Agent Prompt</span>
+                          {promptsModified.pro && (
+                            <Badge variant="default" className="bg-green-600 text-xs">Modified</Badge>
+                          )}
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-2 pt-2">
+                          <Textarea
+                            className="font-mono text-xs"
+                            rows={12}
+                            value={editedPrompts.pro}
+                            onChange={(e) => {
+                              setEditedPrompts({ ...editedPrompts, pro: e.target.value });
+                              setPromptsModified({
+                                ...promptsModified,
+                                pro: e.target.value !== prompts?.pro,
+                              });
+                            }}
+                            placeholder="Loading prompt..."
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditedPrompts({ ...editedPrompts, pro: prompts?.pro || '' });
+                              setPromptsModified({ ...promptsModified, pro: false });
+                            }}
+                            disabled={!promptsModified.pro}
+                          >
+                            Reset Pro Prompt
+                          </Button>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    {/* Con Prompt */}
+                    <AccordionItem value="con">
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center gap-3 w-full">
+                          <span className="font-medium">Con Agent Prompt</span>
+                          {promptsModified.con && (
+                            <Badge variant="destructive" className="text-xs">Modified</Badge>
+                          )}
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-2 pt-2">
+                          <Textarea
+                            className="font-mono text-xs"
+                            rows={12}
+                            value={editedPrompts.con}
+                            onChange={(e) => {
+                              setEditedPrompts({ ...editedPrompts, con: e.target.value });
+                              setPromptsModified({
+                                ...promptsModified,
+                                con: e.target.value !== prompts?.con,
+                              });
+                            }}
+                            placeholder="Loading prompt..."
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditedPrompts({ ...editedPrompts, con: prompts?.con || '' });
+                              setPromptsModified({ ...promptsModified, con: false });
+                            }}
+                            disabled={!promptsModified.con}
+                          >
+                            Reset Con Prompt
+                          </Button>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    {/* Judge Prompt */}
+                    <AccordionItem value="judge">
+                      <AccordionTrigger className="hover:no-underline">
+                        <div className="flex items-center gap-3 w-full">
+                          <span className="font-medium">Judge Prompt</span>
+                          {promptsModified.judge && (
+                            <Badge variant="secondary" className="text-xs">Modified</Badge>
+                          )}
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-2 pt-2">
+                          <Textarea
+                            className="font-mono text-xs"
+                            rows={12}
+                            value={editedPrompts.judge}
+                            onChange={(e) => {
+                              setEditedPrompts({ ...editedPrompts, judge: e.target.value });
+                              setPromptsModified({
+                                ...promptsModified,
+                                judge: e.target.value !== prompts?.judge,
+                              });
+                            }}
+                            placeholder="Loading prompt..."
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditedPrompts({ ...editedPrompts, judge: prompts?.judge || '' });
+                              setPromptsModified({ ...promptsModified, judge: false });
+                            }}
+                            disabled={!promptsModified.judge}
+                          >
+                            Reset Judge Prompt
+                          </Button>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-3 pt-2">
                     <Button
                       variant="outline"
                       onClick={() => {
-                        setEditedPrompt(prompts?.[selectedPrompt] || "");
-                        setPromptModified(false);
+                        setEditedPrompts({
+                          pro: prompts?.pro || '',
+                          con: prompts?.con || '',
+                          judge: prompts?.judge || '',
+                        });
+                        setPromptsModified({ pro: false, con: false, judge: false });
                         setExperimentResult(null);
                       }}
-                      disabled={!promptModified}
+                      disabled={!promptsModified.pro && !promptsModified.con && !promptsModified.judge}
                     >
-                      Reset to Default
+                      Reset All to Default
                     </Button>
                     <Button
                       onClick={async () => {
                         if (!selectedDoc) return;
 
+                        // Collect modified prompts
+                        const modifiedPrompts: { pro?: string; con?: string; judge?: string } = {};
+                        if (promptsModified.pro) modifiedPrompts.pro = editedPrompts.pro;
+                        if (promptsModified.con) modifiedPrompts.con = editedPrompts.con;
+                        if (promptsModified.judge) modifiedPrompts.judge = editedPrompts.judge;
+
+                        if (Object.keys(modifiedPrompts).length === 0) {
+                          toast({
+                            title: "No changes",
+                            description: "Please modify at least one prompt before re-evaluating.",
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+
                         setReEvaluating(true);
                         try {
-                          const result = await apiClient.reEvaluateDocument(
-                            selectedDoc.doc_id,
-                            selectedPrompt,
-                            editedPrompt
+                          const result = await apiClient.reEvaluateDocumentMultiPrompt(
+                            selectedDoc.id,
+                            modifiedPrompts
                           );
                           setExperimentResult(result);
                           toast({
                             title: "Re-evaluation Complete",
-                            description: "Document has been re-evaluated with your custom prompt.",
+                            description: `Document re-evaluated with ${Object.keys(modifiedPrompts).length} modified prompt(s).`,
                           });
                         } catch (error: any) {
                           toast({
@@ -1142,9 +1280,16 @@ export default function Documents() {
                           setReEvaluating(false);
                         }
                       }}
-                      disabled={!promptModified || reEvaluating}
+                      disabled={(!promptsModified.pro && !promptsModified.con && !promptsModified.judge) || reEvaluating}
                     >
-                      {reEvaluating ? "Re-evaluating..." : "Re-evaluate Document"}
+                      {reEvaluating ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Re-evaluating...
+                        </>
+                      ) : (
+                        `Re-evaluate with ${Object.values(promptsModified).filter(Boolean).length} Change${Object.values(promptsModified).filter(Boolean).length !== 1 ? 's' : ''}`
+                      )}
                     </Button>
                   </div>
 
@@ -1154,7 +1299,7 @@ export default function Documents() {
                       <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold">Experiment Results</h3>
                         <Badge variant={experimentResult.improvements.is_improvement ? "default" : "secondary"}>
-                          {experimentResult.improvements.is_improvement ? "✓ Improvement" : "No Change"}
+                          {experimentResult.improvements.is_improvement ? "Improvement" : "No Change"}
                         </Badge>
                       </div>
 
@@ -1192,7 +1337,7 @@ export default function Documents() {
                                 <span className="font-mono">{experimentResult.new_scores.avg_pro_score.toFixed(2)}</span>
                                 {experimentResult.improvements.pro_score_delta !== 0 && (
                                   <span className={experimentResult.improvements.pro_score_delta > 0 ? "text-green-600" : "text-red-600"}>
-                                    {experimentResult.improvements.pro_score_delta > 0 ? "▲" : "▼"} {Math.abs(experimentResult.improvements.pro_score_delta).toFixed(2)}
+                                    {experimentResult.improvements.pro_score_delta > 0 ? "+" : ""}{experimentResult.improvements.pro_score_delta.toFixed(2)}
                                   </span>
                                 )}
                               </div>
@@ -1203,7 +1348,7 @@ export default function Documents() {
                                 <span className="font-mono">{experimentResult.new_scores.avg_con_score.toFixed(2)}</span>
                                 {experimentResult.improvements.con_score_delta !== 0 && (
                                   <span className={experimentResult.improvements.con_score_delta > 0 ? "text-green-600" : "text-red-600"}>
-                                    {experimentResult.improvements.con_score_delta > 0 ? "▲" : "▼"} {Math.abs(experimentResult.improvements.con_score_delta).toFixed(2)}
+                                    {experimentResult.improvements.con_score_delta > 0 ? "+" : ""}{experimentResult.improvements.con_score_delta.toFixed(2)}
                                   </span>
                                 )}
                               </div>
@@ -1213,7 +1358,7 @@ export default function Documents() {
                               <div className="flex items-center gap-2">
                                 <span className="font-mono">{(experimentResult.new_scores.avg_pro_score - experimentResult.new_scores.avg_con_score).toFixed(2)}</span>
                                 {experimentResult.improvements.more_decisive && (
-                                  <span className="text-green-600 text-xs">More Decisive!</span>
+                                  <span className="text-green-600 text-xs">More Decisive</span>
                                 )}
                               </div>
                             </div>
@@ -1222,7 +1367,7 @@ export default function Documents() {
                               <div className="flex items-center gap-2">
                                 <Badge variant="outline" className="text-xs">{experimentResult.new_scores.overall_relevance}</Badge>
                                 {experimentResult.improvements.relevance_upgraded && (
-                                  <span className="text-green-600 text-xs">✓ Upgraded</span>
+                                  <span className="text-green-600 text-xs">Upgraded</span>
                                 )}
                               </div>
                             </div>
@@ -1237,7 +1382,7 @@ export default function Documents() {
                   )}
 
                   <p className="text-xs text-muted-foreground">
-                    Modify the prompt and click "Re-evaluate Document" to see how score changes.
+                    Modify one or more prompts and click "Re-evaluate" to see how scores change.
                     Results are saved as experiments for admin review but do not affect the original evaluation.
                   </p>
                 </div>

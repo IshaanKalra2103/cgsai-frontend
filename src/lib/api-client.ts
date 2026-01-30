@@ -216,6 +216,20 @@ class APIClient {
     });
   }
 
+  async reEvaluateDocumentMultiPrompt(docId: string, prompts: {
+    pro?: string;
+    con?: string;
+    judge?: string;
+  }, question?: string) {
+    return this.request(`/documents/${docId}/re-evaluate-multi`, {
+      method: 'POST',
+      body: JSON.stringify({
+        prompts,
+        question,
+      }),
+    });
+  }
+
   // ===== Admin endpoints =====
   async getUsers() {
     return this.request('/admin/users');
@@ -299,6 +313,29 @@ class APIClient {
     return this.request(`/admin/experiments/${experimentId}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    });
+  }
+
+  // ===== Scoring Config endpoints =====
+  async getScoringConfig() {
+    return this.request('/admin/scoring-config');
+  }
+
+  async updateScoringConfig(config: {
+    confident_relevance_score?: number;
+    borderline_score?: number;
+    paper_relevance_threshold?: number;
+    borderline_combined_threshold?: number;
+  }) {
+    return this.request('/admin/scoring-config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async resetScoringConfig() {
+    return this.request('/admin/scoring-config/reset', {
+      method: 'POST',
     });
   }
 }

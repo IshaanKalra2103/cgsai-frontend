@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
 import { LogEntry, PromptVersion, Feedback } from '@/types';
-import { FileText, MessageSquare, Wand2, Users, Database, Download, Trash2, AlertTriangle, Shield, RefreshCw, UserPlus, Loader2, Activity, CheckCircle2, XCircle } from 'lucide-react';
+import { FileText, MessageSquare, Wand2, Users, Database, Download, Trash2, AlertTriangle, Shield, RefreshCw, UserPlus, Loader2, Activity, CheckCircle2, XCircle, Calculator, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
 
@@ -49,6 +49,12 @@ export default function Admin() {
   const [logSearch, setLogSearch] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState('');
 
+  // Scoring config state
+  const [scoringConfig, setScoringConfig] = useState<any | null>(null);
+  const [scoringConfigLoading, setScoringConfigLoading] = useState(false);
+  const [editedScoringConfig, setEditedScoringConfig] = useState<any | null>(null);
+  const [scoringConfigEditing, setScoringConfigEditing] = useState(false);
+
   // New user form
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -65,6 +71,7 @@ export default function Admin() {
     loadFeedback();
     loadPrompts();
     loadExperiments();
+    loadScoringConfig();
   }, []);
 
   // Reload experiments when filter changes
@@ -157,6 +164,60 @@ export default function Admin() {
       setExperimentStats(null);
     } finally {
       setExperimentsLoading(false);
+    }
+  };
+
+  const loadScoringConfig = async () => {
+    setScoringConfigLoading(true);
+    try {
+      const response = await apiClient.getScoringConfig();
+      setScoringConfig(response);
+      setEditedScoringConfig(response.raw || {});
+    } catch (error: any) {
+      console.error("Error loading scoring config:", error);
+      setScoringConfig(null);
+    } finally {
+      setScoringConfigLoading(false);
+    }
+  };
+
+  const handleSaveScoringConfig = async () => {
+    if (!editedScoringConfig) return;
+
+    try {
+      const response = await apiClient.updateScoringConfig(editedScoringConfig);
+      setScoringConfig(response);
+      setEditedScoringConfig(response.raw || {});
+      setScoringConfigEditing(false);
+      toast({
+        title: "Scoring configuration saved",
+        description: "The scoring thresholds have been updated successfully.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to save scoring configuration",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleResetScoringConfig = async () => {
+    try {
+      const response = await apiClient.resetScoringConfig();
+      setScoringConfig(response);
+      setEditedScoringConfig(response.raw || {});
+      setScoringConfigEditing(false);
+      toast({
+        title: "Scoring configuration reset",
+        description: "The scoring thresholds have been reset to defaults.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to reset scoring configuration",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -455,7 +516,7 @@ export default function Admin() {
       )}
 
       <Tabs defaultValue="users">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="logs" className="gap-2">
             <FileText className="h-4 w-4" />
             Logs
@@ -471,6 +532,10 @@ export default function Admin() {
           <TabsTrigger value="experiments" className="gap-2">
             <Wand2 className="h-4 w-4" />
             Experiments
+          </TabsTrigger>
+          <TabsTrigger value="scoring" className="gap-2">
+            <Calculator className="h-4 w-4" />
+            Scoring
           </TabsTrigger>
           <TabsTrigger value="users" className="gap-2">
             <Users className="h-4 w-4" />
@@ -1243,6 +1308,114 @@ export default function Admin() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Scoring Tab */}
+        <TabsContent value="scoring" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Scoring Thresholds</CardTitle>
+                  <CardDescription>
+                    Configure the thresholds used to determine paper relevance from judge scores
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  {scoringConfigEditing ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setEditedScoringConfig(scoringConfig?.raw || {});
+                          setScoringConfigEditing(false);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button onClick={handleSaveScoringConfig}>
+                        Save Changes
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={handleResetScoringConfig}
+                      >
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                        Reset to Defaults
+                      </Button>
+                      <Button onClick={() => setScoringConfigEditing(true)}>
+                        Edit Thresholds
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {scoringConfigLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  <span className="text-muted-foreground">Loading scoring configuration...</span>
+                </div>
+              ) : scoringConfig ? (
+                <div className="space-y-6">
+                  {Object.entries(scoringConfig.config || {}).map(([key, data]: [string, any]) => (
+                    <div key={key} className="grid gap-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-base font-medium">
+                          {key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                        </Label>
+                        {scoringConfigEditing ? (
+                          <Input
+                            type="number"
+                            step={data.max <= 1 ? "0.05" : "0.5"}
+                            min={data.min}
+                            max={data.max}
+                            value={editedScoringConfig?.[key] ?? data.value}
+                            onChange={(e) => setEditedScoringConfig({
+                              ...editedScoringConfig,
+                              [key]: parseFloat(e.target.value)
+                            })}
+                            className="w-24 text-right"
+                          />
+                        ) : (
+                          <span className="text-lg font-mono">
+                            {data.value}{data.max <= 1 ? '' : '/10'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">{data.description}</p>
+                      <div className="text-xs text-muted-foreground">
+                        Range: {data.min} - {data.max}
+                      </div>
+                      <Separator className="mt-2" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Calculator className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">Failed to load scoring configuration</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Alert>
+            <Calculator className="h-4 w-4" />
+            <AlertTitle>How Scoring Works</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
+                <li><strong>Confident Relevance Score:</strong> If a winning side scores at or above this threshold, the paper is confidently classified as relevant/not-relevant.</li>
+                <li><strong>Borderline Score:</strong> If the winning side scores between this and the confident threshold, the paper is classified as borderline.</li>
+                <li><strong>Paper Relevance Threshold:</strong> The proportion of individual questions that must be rated "relevant" for the paper to be overall relevant (e.g., 0.6 = 60%).</li>
+                <li><strong>Borderline Combined Threshold:</strong> The combined proportion of "relevant" + "borderline" questions needed for an overall borderline classification.</li>
+              </ul>
+            </AlertDescription>
+          </Alert>
+        </TabsContent>
 
         {/* Users Tab */}
         <TabsContent value="users" className="space-y-4">

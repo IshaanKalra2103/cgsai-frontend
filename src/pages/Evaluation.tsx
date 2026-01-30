@@ -10,9 +10,10 @@ import { toast } from '@/hooks/use-toast';
 import PipelineProgress from '@/components/evaluation/PipelineProgress';
 import EvaluationResults from '@/components/evaluation/EvaluationResults';
 import { RelevanceStatus, DocumentMetadata, DebateResponse } from '@/types';
-import { Upload, Play, Settings2, AlertTriangle, FileText } from 'lucide-react';
+import { Upload, Play, Settings2, AlertTriangle, FileText, Loader2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { usePipelineStream } from '@/hooks/usePipelineStream';
+import { useEvaluation } from '@/contexts/EvaluationContext';
 
 const DEFAULT_RESEARCH_QUESTION = `Methane is a potent greenhouse gas and is emitted from oil and gas, coal, rice cultivation, enteric fermentation, manure, and waste sectors. We are interested in strategies/technologies to reduce its emissions. Does the paper discuss methods or technologies to mitigate methane emissions from any one of the sectors?`;
 
@@ -142,11 +143,11 @@ export default function Evaluation() {
   const [file, setFile] = useState<File | null>(null);
   const [groundTruth, setGroundTruth] = useState<RelevanceStatus>('NOT_SPECIFIED');
   const [researchQuestion, setResearchQuestion] = useState(DEFAULT_RESEARCH_QUESTION);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [elapsedTime, setElapsedTime] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
-  const [evaluationResult, setEvaluationResult] = useState<any | null>(null);
+
+  // Use evaluation context for persistent state across tab navigation
+  const { state: evalState, startEvaluation, setResult, clearEvaluation, setProcessing } = useEvaluation();
+  const { jobId, isProcessing, elapsedTime, evaluationResult } = evalState;
 
   // Model configurations
   const [metadataModel, setMetadataModel] = useState('gpt-4o-mini');
@@ -162,39 +163,30 @@ export default function Evaluation() {
   // Use SSE hook for real-time pipeline updates
   const { stages, currentStage, isComplete, error: pipelineError, result } = usePipelineStream(jobId);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isProcessing) {
-      interval = setInterval(() => {
-        setElapsedTime(prev => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isProcessing]);
+  // Note: elapsed time is now managed by EvaluationContext
 
   // Handle pipeline completion
   useEffect(() => {
     if (isComplete && result) {
-      setIsProcessing(false);
-      setEvaluationResult(result);
+      setResult(result);
       toast({
         title: "Evaluation complete",
         description: "The paper has been successfully evaluated.",
       });
     }
-  }, [isComplete, result]);
+  }, [isComplete, result, setResult]);
 
   // Handle pipeline errors
   useEffect(() => {
     if (pipelineError) {
-      setIsProcessing(false);
+      setProcessing(false);
       toast({
         title: "Evaluation failed",
         description: pipelineError,
         variant: "destructive",
       });
     }
-  }, [pipelineError]);
+  }, [pipelineError, setProcessing]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -209,19 +201,15 @@ export default function Evaluation() {
       }
       setFile(selectedFile);
       setDuplicateWarning(null);
-      setEvaluationResult(null);
-      setJobId(null);
+      clearEvaluation();
     }
   };
 
   const handleEvaluate = async () => {
     if (!file || groundTruth === 'NOT_SPECIFIED') return;
 
-    setIsProcessing(true);
-    setElapsedTime(0);
     setDuplicateWarning(null);
-    setEvaluationResult(null);
-    setJobId(null);
+    clearEvaluation();
 
     try {
       // Create FormData for file upload
@@ -243,12 +231,11 @@ export default function Evaluation() {
           `Previous evaluation: ${uploadResponse.existing_doc?.title || 'Unknown'}. ` +
           `To re-run with new prompts, use the prompt re-evaluation section.`
         );
-        setIsProcessing(false);
         return;
       }
 
-      // Set job ID to start SSE stream
-      setJobId(uploadResponse.job_id);
+      // Start evaluation with job ID - this triggers the timer in context
+      startEvaluation(uploadResponse.job_id);
 
       // Start pipeline execution
       await apiClient.startPipeline(uploadResponse.job_id);
@@ -259,7 +246,7 @@ export default function Evaluation() {
       });
 
     } catch (error: any) {
-      setIsProcessing(false);
+      setProcessing(false);
       toast({
         title: "Evaluation failed",
         description: error.message || "An error occurred during processing.",
@@ -591,11 +578,23 @@ export default function Evaluation() {
           {isProcessing && (
             <Card>
               <CardContent className="pt-6">
-                <PipelineProgress 
+                {/* Pipeline checkpoint animation - temporarily disabled due to SSE issues
+                <PipelineProgress
                   stages={stages}
                   currentStage={currentStage}
                   elapsedTime={elapsedTime}
                 />
+                */}
+                <div className="flex flex-col items-center justify-center space-y-4 py-12">
+                  <Loader2 className="h-16 w-16 animate-spin text-primary" />
+                  <div className="text-center">
+                    <h3 className="font-semibold text-lg">Evaluating Paper...</h3>
+                    <p className="text-sm text-muted-foreground mt-1">This may take a few minutes</p>
+                    <p className="text-sm text-muted-foreground font-mono mt-2">
+                      Elapsed: {Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
