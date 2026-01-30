@@ -5,7 +5,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { PipelineStage } from '@/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+function normalizeApiBaseUrl(raw: string): string {
+  const trimmed = raw.replace(/\/+$/, '');
+  if (trimmed.endsWith('/api/v1')) return trimmed;
+  return `${trimmed}/api/v1`;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(
+  import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+);
 
 const INITIAL_STAGES: PipelineStage[] = [
   { id: '1', name: 'Initialization', status: 'pending' },

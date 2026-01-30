@@ -5,19 +5,12 @@ steps:
     args:
       - 'build'
       - '--build-arg'
-      - 'VITE_API_URL=https://cgs-multiagent-777957407803.us-central1.run.app'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/cgsai-frontend:$COMMIT_SHA'
+      - 'VITE_API_URL=${_VITE_API_URL}'
       - '-t'
       - 'gcr.io/$PROJECT_ID/cgsai-frontend:latest'
       - '.'
 
   # Push the container image to Container Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'push'
-      - 'gcr.io/$PROJECT_ID/cgsai-frontend:$COMMIT_SHA'
-
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -31,7 +24,7 @@ steps:
       - 'deploy'
       - 'cgsai-frontend'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/cgsai-frontend:$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/cgsai-frontend:latest'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -47,7 +40,6 @@ steps:
       - '0'
 
 images:
-  - 'gcr.io/$PROJECT_ID/cgsai-frontend:$COMMIT_SHA'
   - 'gcr.io/$PROJECT_ID/cgsai-frontend:latest'
 
 options:
@@ -55,3 +47,7 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 timeout: '600s'
+
+# Default (can be overridden by: gcloud builds submit --substitutions)
+substitutions:
+  _VITE_API_URL: 'http://localhost:8000/api/v1'
