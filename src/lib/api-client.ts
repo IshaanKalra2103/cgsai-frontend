@@ -156,6 +156,10 @@ class APIClient {
     return this.request(`/evaluation/start/${jobId}`, { method: 'POST' });
   }
 
+  async getStatus(jobId: string) {
+    return this.request(`/evaluation/status/${jobId}`);
+  }
+
   async getResults(jobId: string) {
     return this.request(`/evaluation/results/${jobId}`);
   }

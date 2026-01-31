@@ -64,6 +64,7 @@ import {
   Scale,
   Trophy,
   Users,
+  RefreshCw,
 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 
@@ -432,6 +433,15 @@ export default function Documents() {
             <SelectItem value="BORDERLINE">Borderline</SelectItem>
           </SelectContent>
         </Select>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={loadDocuments}
+          disabled={loading}
+          title="Refresh documents"
+        >
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+        </Button>
       </div>
 
       {/* Document Table */}

@@ -1,197 +1,302 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { toast } from '@/hooks/use-toast';
-import PipelineProgress from '@/components/evaluation/PipelineProgress';
-import EvaluationResults from '@/components/evaluation/EvaluationResults';
-import { RelevanceStatus, DocumentMetadata, DebateResponse } from '@/types';
-import { Upload, Play, Settings2, AlertTriangle, FileText, Loader2 } from 'lucide-react';
-import { apiClient } from '@/lib/api-client';
-import { usePipelineStream } from '@/hooks/usePipelineStream';
-import { useEvaluation } from '@/contexts/EvaluationContext';
+import { useState, useRef, useEffect } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { toast } from "@/hooks/use-toast";
+import EvaluationResults from "@/components/evaluation/EvaluationResults";
+import { RelevanceStatus, DocumentMetadata, DebateResponse } from "@/types";
+import {
+  Upload,
+  Play,
+  Settings2,
+  AlertTriangle,
+  FileText,
+  Loader2,
+} from "lucide-react";
+import { apiClient } from "@/lib/api-client";
+import { useEvaluation } from "@/contexts/EvaluationContext";
 
 const DEFAULT_RESEARCH_QUESTION = `Methane is a potent greenhouse gas and is emitted from oil and gas, coal, rice cultivation, enteric fermentation, manure, and waste sectors. We are interested in strategies/technologies to reduce its emissions. Does the paper discuss methods or technologies to mitigate methane emissions from any one of the sectors?`;
 
 const normalizeRelevance = (value?: string | null) => {
-  if (!value) return 'NOT_SPECIFIED' as RelevanceStatus;
+  if (!value) return "NOT_SPECIFIED" as RelevanceStatus;
   const normalized = value.toUpperCase();
-  if (normalized === 'NOT_RELEVANT') return 'NON_RELEVANT';
+  if (normalized === "NOT_RELEVANT") return "NON_RELEVANT";
   return normalized as RelevanceStatus;
 };
 
 const normalizeMetadata = (metadata: any): DocumentMetadata => ({
-  title: metadata?.title || 'Untitled',
+  title: metadata?.title || "Untitled",
   authors: Array.isArray(metadata?.authors) ? metadata.authors : [],
   doi: metadata?.doi || undefined,
-  publicationDate: metadata?.publication_date || metadata?.publicationDate || undefined,
+  publicationDate:
+    metadata?.publication_date || metadata?.publicationDate || undefined,
   abstract: metadata?.abstract || undefined,
 });
 
-const normalizeDebate = (debate: any[]): DebateResponse[] => {
-  if (!Array.isArray(debate)) return [];
-  return debate.map((item) => ({
-    question: item?.question || '',
-    proArgument: item?.pro_argument || item?.proArgument || '',
-    conArgument: item?.con_argument || item?.conArgument || '',
-  }));
+const normalizeDebate = (debate: any): DebateResponse[] => {
+  // Handle nested structure from server: { session: { question_debates: [...] } }
+  const questionDebates =
+    debate?.session?.question_debates ||
+    debate?.question_debates ||
+    (Array.isArray(debate) ? debate : []);
+
+  if (!Array.isArray(questionDebates)) return [];
+
+  return questionDebates.map((item: any) => {
+    // Extract pro and con arguments from agent_responses
+    const agentResponses = item?.agent_responses || [];
+    const proResponse = agentResponses.find((r: any) =>
+      r?.agent_name?.toLowerCase().includes("pro"),
+    );
+    const conResponse = agentResponses.find((r: any) =>
+      r?.agent_name?.toLowerCase().includes("con"),
+    );
+
+    return {
+      question: item?.question_text || item?.question || "",
+      proArgument:
+        proResponse?.response || item?.pro_argument || item?.proArgument || "",
+      conArgument:
+        conResponse?.response || item?.con_argument || item?.conArgument || "",
+    };
+  });
 };
 
 const normalizeEvaluation = (evaluation: any) => ({
-  id: evaluation?.id || evaluation?.job_id || 'unknown',
-  documentId: evaluation?.document_id || evaluation?.doc_id || '',
-  overallRelevance: normalizeRelevance(evaluation?.overall_relevance || evaluation?.overallRelevance),
-  avgProScore: Number(evaluation?.avg_pro_score ?? evaluation?.avgProScore ?? 0),
-  avgConScore: Number(evaluation?.avg_con_score ?? evaluation?.avgConScore ?? 0),
+  id: evaluation?.id || evaluation?.job_id || "unknown",
+  documentId: evaluation?.document_id || evaluation?.doc_id || "",
+  overallRelevance: normalizeRelevance(
+    evaluation?.overall_relevance || evaluation?.overallRelevance,
+  ),
+  avgProScore: Number(
+    evaluation?.avg_pro_score ?? evaluation?.avgProScore ?? 0,
+  ),
+  avgConScore: Number(
+    evaluation?.avg_con_score ?? evaluation?.avgConScore ?? 0,
+  ),
   proWins: Number(evaluation?.pro_wins ?? evaluation?.proWins ?? 0),
   conWins: Number(evaluation?.con_wins ?? evaluation?.conWins ?? 0),
   ties: Number(evaluation?.ties ?? evaluation?.tie_count ?? 0),
-  summary: evaluation?.summary || '',
+  summary: evaluation?.summary || "",
   questions: Array.isArray(evaluation?.questions)
     ? evaluation.questions.map((q: any) => ({
-        question: q?.question || '',
-        winner: q?.winner || 'tie',
+        question: q?.question || "",
+        winner: q?.winner || "tie",
         proScore: Number(q?.pro_score ?? q?.proScore ?? 0),
         conScore: Number(q?.con_score ?? q?.conScore ?? 0),
         kappa: Number(q?.kappa ?? 0),
-        summary: q?.summary || '',
+        summary: q?.summary || "",
         judges: Array.isArray(q?.judges)
           ? q.judges.map((j: any) => ({
-              judgeId: j?.judge_id || j?.judgeId || '',
+              judgeId: j?.judge_id || j?.judgeId || "",
               proScore: Number(j?.pro_score ?? j?.proScore ?? 0),
               conScore: Number(j?.con_score ?? j?.conScore ?? 0),
-              reasoning: j?.reasoning || '',
+              reasoning: j?.reasoning || "",
               quotes: j?.quotes || undefined,
             }))
           : [],
       }))
     : [],
-  createdAt: evaluation?.created_at || evaluation?.createdAt || new Date().toISOString(),
+  createdAt:
+    evaluation?.created_at || evaluation?.createdAt || new Date().toISOString(),
 });
 
 const MOCK_RESULT: any = {
-  id: '1',
-  documentId: 'doc-1',
-  overallRelevance: 'RELEVANT',
+  id: "1",
+  documentId: "doc-1",
+  overallRelevance: "RELEVANT",
   avgProScore: 4.2,
   avgConScore: 2.8,
   proWins: 3,
   conWins: 1,
   ties: 1,
-  summary: 'The paper presents a comprehensive analysis of methane capture technologies applicable to livestock operations. The proposed membrane-based separation system shows promise with estimated 60% methane recovery rates. While implementation costs remain a challenge, the paper provides actionable pathways for near-term deployment.',
+  summary:
+    "The paper presents a comprehensive analysis of methane capture technologies applicable to livestock operations. The proposed membrane-based separation system shows promise with estimated 60% methane recovery rates. While implementation costs remain a challenge, the paper provides actionable pathways for near-term deployment.",
   questions: [
     {
-      question: 'Does the paper propose specific methane mitigation technologies?',
-      winner: 'pro',
+      question:
+        "Does the paper propose specific methane mitigation technologies?",
+      winner: "pro",
       proScore: 4.5,
       conScore: 2.3,
       kappa: 0.78,
-      summary: 'Strong consensus that the paper details specific membrane-based capture systems.',
+      summary:
+        "Strong consensus that the paper details specific membrane-based capture systems.",
       judges: [
-        { judgeId: '1', proScore: 5, conScore: 2, reasoning: 'Clear technical specifications provided for the membrane system.' },
-        { judgeId: '2', proScore: 4, conScore: 3, reasoning: 'Technology is specific but lacks some implementation details.' },
-        { judgeId: '3', proScore: 5, conScore: 2, reasoning: 'Excellent technical depth with clear actionable steps.' },
-        { judgeId: '4', proScore: 4, conScore: 2, reasoning: 'Well-defined technology with practical applications.' },
-        { judgeId: '5', proScore: 4, conScore: 3, reasoning: 'Specific technology but some scalability questions remain.' },
-      ]
+        {
+          judgeId: "1",
+          proScore: 5,
+          conScore: 2,
+          reasoning:
+            "Clear technical specifications provided for the membrane system.",
+        },
+        {
+          judgeId: "2",
+          proScore: 4,
+          conScore: 3,
+          reasoning:
+            "Technology is specific but lacks some implementation details.",
+        },
+        {
+          judgeId: "3",
+          proScore: 5,
+          conScore: 2,
+          reasoning: "Excellent technical depth with clear actionable steps.",
+        },
+        {
+          judgeId: "4",
+          proScore: 4,
+          conScore: 2,
+          reasoning: "Well-defined technology with practical applications.",
+        },
+        {
+          judgeId: "5",
+          proScore: 4,
+          conScore: 3,
+          reasoning:
+            "Specific technology but some scalability questions remain.",
+        },
+      ],
     },
     {
-      question: 'Are quantitative methane reduction estimates provided?',
-      winner: 'pro',
+      question: "Are quantitative methane reduction estimates provided?",
+      winner: "pro",
       proScore: 4.0,
       conScore: 3.0,
       kappa: 0.65,
-      summary: 'Paper includes 60% recovery rate estimates with uncertainty ranges.',
+      summary:
+        "Paper includes 60% recovery rate estimates with uncertainty ranges.",
       judges: [
-        { judgeId: '1', proScore: 4, conScore: 3, reasoning: 'Quantitative estimates provided but could be more rigorous.' },
-        { judgeId: '2', proScore: 4, conScore: 3, reasoning: 'Good estimates with reasonable uncertainty bounds.' },
-        { judgeId: '3', proScore: 4, conScore: 3, reasoning: 'Solid quantitative analysis overall.' },
-        { judgeId: '4', proScore: 4, conScore: 3, reasoning: 'Numbers are present and well-justified.' },
-        { judgeId: '5', proScore: 4, conScore: 3, reasoning: 'Adequate quantification for this stage of development.' },
-      ]
+        {
+          judgeId: "1",
+          proScore: 4,
+          conScore: 3,
+          reasoning:
+            "Quantitative estimates provided but could be more rigorous.",
+        },
+        {
+          judgeId: "2",
+          proScore: 4,
+          conScore: 3,
+          reasoning: "Good estimates with reasonable uncertainty bounds.",
+        },
+        {
+          judgeId: "3",
+          proScore: 4,
+          conScore: 3,
+          reasoning: "Solid quantitative analysis overall.",
+        },
+        {
+          judgeId: "4",
+          proScore: 4,
+          conScore: 3,
+          reasoning: "Numbers are present and well-justified.",
+        },
+        {
+          judgeId: "5",
+          proScore: 4,
+          conScore: 3,
+          reasoning: "Adequate quantification for this stage of development.",
+        },
+      ],
     },
   ],
   createdAt: new Date().toISOString(),
 };
 
 const MOCK_METADATA: DocumentMetadata = {
-  title: 'Membrane-Based Methane Capture Systems for Agricultural Applications',
-  authors: ['J. Smith', 'A. Johnson', 'M. Williams'],
-  doi: '10.1234/methane.2024.001',
-  publicationDate: '2024-06-15',
-  abstract: 'This paper presents a novel membrane-based methane capture system designed specifically for livestock operations. Our approach leverages selective polymer membranes to achieve methane recovery rates of up to 60% under field conditions. We provide detailed cost analysis and implementation pathways for commercial-scale deployment.',
+  title: "Membrane-Based Methane Capture Systems for Agricultural Applications",
+  authors: ["J. Smith", "A. Johnson", "M. Williams"],
+  doi: "10.1234/methane.2024.001",
+  publicationDate: "2024-06-15",
+  abstract:
+    "This paper presents a novel membrane-based methane capture system designed specifically for livestock operations. Our approach leverages selective polymer membranes to achieve methane recovery rates of up to 60% under field conditions. We provide detailed cost analysis and implementation pathways for commercial-scale deployment.",
 };
 
 const MOCK_DEBATE: DebateResponse[] = [
   {
-    question: 'Does the paper propose specific methane mitigation technologies?',
-    proArgument: 'The paper clearly describes a membrane-based methane capture system with specific polymer compositions (PDMS-based selective layers) and operational parameters. Technical specifications include membrane thickness (0.5-1.0 μm), operating pressure (2-5 bar), and module configurations suitable for barn-scale deployment.',
-    conArgument: 'While the paper mentions membrane technology, it lacks detailed engineering drawings and operational protocols necessary for actual implementation. The technology readiness level appears low, and key integration challenges with existing farm infrastructure are not addressed.',
+    question:
+      "Does the paper propose specific methane mitigation technologies?",
+    proArgument:
+      "The paper clearly describes a membrane-based methane capture system with specific polymer compositions (PDMS-based selective layers) and operational parameters. Technical specifications include membrane thickness (0.5-1.0 μm), operating pressure (2-5 bar), and module configurations suitable for barn-scale deployment.",
+    conArgument:
+      "While the paper mentions membrane technology, it lacks detailed engineering drawings and operational protocols necessary for actual implementation. The technology readiness level appears low, and key integration challenges with existing farm infrastructure are not addressed.",
   },
   {
-    question: 'Are quantitative methane reduction estimates provided?',
-    proArgument: 'The paper provides specific quantitative estimates: 60% methane recovery rate under optimal conditions, with sensitivity analysis showing 45-70% range depending on atmospheric conditions. Annual emission reduction potential is estimated at 15-20 tons CO2-equivalent per 100 cattle.',
-    conArgument: 'The quantitative estimates rely heavily on laboratory conditions that may not translate to real-world agricultural settings. Field validation data is limited to short-term pilots, and long-term performance degradation is not adequately modeled.',
+    question: "Are quantitative methane reduction estimates provided?",
+    proArgument:
+      "The paper provides specific quantitative estimates: 60% methane recovery rate under optimal conditions, with sensitivity analysis showing 45-70% range depending on atmospheric conditions. Annual emission reduction potential is estimated at 15-20 tons CO2-equivalent per 100 cattle.",
+    conArgument:
+      "The quantitative estimates rely heavily on laboratory conditions that may not translate to real-world agricultural settings. Field validation data is limited to short-term pilots, and long-term performance degradation is not adequately modeled.",
   },
 ];
 
 export default function Evaluation() {
   const [file, setFile] = useState<File | null>(null);
-  const [groundTruth, setGroundTruth] = useState<RelevanceStatus>('NOT_SPECIFIED');
-  const [researchQuestion, setResearchQuestion] = useState(DEFAULT_RESEARCH_QUESTION);
+  const [groundTruth, setGroundTruth] =
+    useState<RelevanceStatus>("NOT_SPECIFIED");
+  const [researchQuestion, setResearchQuestion] = useState(
+    DEFAULT_RESEARCH_QUESTION,
+  );
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   // Use evaluation context for persistent state across tab navigation
-  const { state: evalState, startEvaluation, setResult, clearEvaluation, setProcessing } = useEvaluation();
+  const {
+    state: evalState,
+    startEvaluation,
+    setResult,
+    clearEvaluation,
+    setProcessing,
+  } = useEvaluation();
   const { jobId, isProcessing, elapsedTime, evaluationResult } = evalState;
 
+  // Debug: Log when evaluation result changes
+  useEffect(() => {
+    console.log("🎯 Evaluation Result Changed:", evaluationResult);
+    console.log("🎯 Is Processing:", isProcessing);
+    console.log("🎯 Job ID:", jobId);
+  }, [evaluationResult, isProcessing, jobId]);
+
   // Model configurations
-  const [metadataModel, setMetadataModel] = useState('gpt-4o-mini');
-  const [debateModel, setDebateModel] = useState('gpt-4.1');
+  const [metadataModel, setMetadataModel] = useState("gpt-4o-mini");
+  const [debateModel, setDebateModel] = useState("gpt-4.1");
   const [judgeModels, setJudgeModels] = useState({
-    J1: 'gpt-4.1-2025-04-14',
-    J2: 'gpt-5-2025-08-07',
-    J3: 'gpt-4o',
-    J4: 'o3-2025-04-16',
-    J5: 'o4-mini-2025-04-16',
+    J1: "gpt-4.1-2025-04-14",
+    J2: "gpt-5-2025-08-07",
+    J3: "gpt-4o",
+    J4: "gpt-5.2-2025-12-11",
+    J5: "gpt-5.2-2025-12-11",
   });
 
-  // Use SSE hook for real-time pipeline updates
-  const { stages, currentStage, isComplete, error: pipelineError, result } = usePipelineStream(jobId);
-
-  // Note: elapsed time is now managed by EvaluationContext
-
-  // Handle pipeline completion
-  useEffect(() => {
-    if (isComplete && result) {
-      setResult(result);
-      toast({
-        title: "Evaluation complete",
-        description: "The paper has been successfully evaluated.",
-      });
-    }
-  }, [isComplete, result, setResult]);
-
-  // Handle pipeline errors
-  useEffect(() => {
-    if (pipelineError) {
-      setProcessing(false);
-      toast({
-        title: "Evaluation failed",
-        description: pipelineError,
-        variant: "destructive",
-      });
-    }
-  }, [pipelineError, setProcessing]);
+  // Ref to track if evaluation was cancelled
+  const cancelledRef = useRef(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.type !== 'application/pdf') {
+      if (selectedFile.type !== "application/pdf") {
         toast({
           title: "Invalid file type",
           description: "Please upload a PDF file.",
@@ -201,25 +306,27 @@ export default function Evaluation() {
       }
       setFile(selectedFile);
       setDuplicateWarning(null);
+      cancelledRef.current = true; // Cancel any ongoing evaluation
       clearEvaluation();
     }
   };
 
   const handleEvaluate = async () => {
-    if (!file || groundTruth === 'NOT_SPECIFIED') return;
+    if (!file || groundTruth === "NOT_SPECIFIED") return;
 
     setDuplicateWarning(null);
     clearEvaluation();
+    cancelledRef.current = false;
 
     try {
       // Create FormData for file upload
       const formData = new FormData();
-      formData.append('file', file);
-      formData.append('question', researchQuestion);
-      formData.append('ground_truth', groundTruth);
-      formData.append('metadata_model', metadataModel);
-      formData.append('debate_model', debateModel);
-      formData.append('judge_models', JSON.stringify(judgeModels));
+      formData.append("file", file);
+      formData.append("question", researchQuestion);
+      formData.append("ground_truth", groundTruth);
+      formData.append("metadata_model", metadataModel);
+      formData.append("debate_model", debateModel);
+      formData.append("judge_models", JSON.stringify(judgeModels));
 
       // Upload paper
       const uploadResponse = await apiClient.uploadPaper(formData);
@@ -228,8 +335,10 @@ export default function Evaluation() {
       if (uploadResponse.is_duplicate) {
         setDuplicateWarning(
           `This paper has already been processed (${uploadResponse.duplicate_type}). ` +
-          `Previous evaluation: ${uploadResponse.existing_doc?.title || 'Unknown'}. ` +
-          `To re-run with new prompts, use the prompt re-evaluation section.`
+            `Previous evaluation: ${
+              uploadResponse.existing_doc?.title || "Unknown"
+            }. ` +
+            `To re-run with new prompts, use the prompt re-evaluation section.`,
         );
         return;
       }
@@ -242,9 +351,57 @@ export default function Evaluation() {
 
       toast({
         title: "Pipeline started",
-        description: "Real-time progress updates will appear below.",
+        description: "Waiting for evaluation to complete...",
       });
 
+      // Wait for results with simple retry loop
+      const RETRY_INTERVAL = 3000; // 3 seconds between retries
+      const MAX_RETRIES = 200; // ~10 minutes max wait
+      let retries = 0;
+
+      while (retries < MAX_RETRIES && !cancelledRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL));
+
+        if (cancelledRef.current) break;
+
+        try {
+          const results: any = await apiClient.getResults(uploadResponse.job_id);
+
+          console.log("📊 Results received:", results);
+          console.log("📊 Results status:", results.status);
+          console.log("📊 Results metadata:", results.metadata);
+          console.log("📊 Results evaluation:", results.evaluation);
+          console.log("📊 Results debate:", results.debate);
+
+          if (results.status === "completed") {
+            // Got results - update state and show success
+            console.log("✅ Setting result in context");
+            setResult(results);
+            toast({
+              title: "Evaluation complete",
+              description: "The paper has been successfully evaluated.",
+            });
+            return;
+          } else if (results.status === "failed") {
+            throw new Error(results.error || "Pipeline failed");
+          }
+          // Status is "running" - continue waiting
+        } catch (err: any) {
+          // If it's a 500 error with "Pipeline failed", propagate it
+          if (err.message?.includes("Pipeline failed")) {
+            throw err;
+          }
+          // Otherwise log and continue retrying (might be transient)
+          console.warn("Error fetching results, retrying...", err);
+        }
+
+        retries++;
+      }
+
+      // If we exit the loop without results
+      if (!cancelledRef.current) {
+        throw new Error("Evaluation timed out. Please check the results later.");
+      }
     } catch (error: any) {
       setProcessing(false);
       toast({
@@ -255,7 +412,7 @@ export default function Evaluation() {
     }
   };
 
-  const canEvaluate = file && groundTruth !== 'NOT_SPECIFIED' && !isProcessing;
+  const canEvaluate = file && groundTruth !== "NOT_SPECIFIED" && !isProcessing;
 
   const normalizedResult = evaluationResult?.evaluation
     ? normalizeEvaluation(evaluationResult.evaluation)
@@ -267,12 +424,19 @@ export default function Evaluation() {
     ? normalizeDebate(evaluationResult.debate)
     : null;
 
+  console.log("🔍 Normalized Result:", normalizedResult);
+  console.log("🔍 Normalized Metadata:", normalizedMetadata);
+  console.log("🔍 Normalized Debate:", normalizedDebate);
+  console.log("🔍 Evaluation Result:", evaluationResult);
+  console.log("🔍 Is Processing:", isProcessing);
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Paper Evaluation</h2>
         <p className="text-muted-foreground">
-          Upload a PDF paper to evaluate its relevance to methane mitigation research
+          Upload a PDF paper to evaluate its relevance to methane mitigation
+          research
         </p>
       </div>
 
@@ -315,7 +479,9 @@ export default function Evaluation() {
                       <p className="text-sm text-muted-foreground">
                         Click to upload or drag and drop
                       </p>
-                      <p className="text-xs text-muted-foreground mt-1">PDF files only</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        PDF files only
+                      </p>
                     </div>
                   )}
                 </label>
@@ -327,11 +493,13 @@ export default function Evaluation() {
           <Card>
             <CardHeader>
               <CardTitle>Ground Truth Relevance</CardTitle>
-              <CardDescription>Select the expected relevance classification</CardDescription>
+              <CardDescription>
+                Select the expected relevance classification
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <Select 
-                value={groundTruth} 
+              <Select
+                value={groundTruth}
                 onValueChange={(v) => setGroundTruth(v as RelevanceStatus)}
                 disabled={isProcessing}
               >
@@ -344,7 +512,7 @@ export default function Evaluation() {
                   <SelectItem value="NON_RELEVANT">Non-Relevant</SelectItem>
                 </SelectContent>
               </Select>
-              {groundTruth === 'NOT_SPECIFIED' && (
+              {groundTruth === "NOT_SPECIFIED" && (
                 <p className="text-sm text-destructive mt-2">
                   Please select a ground truth value to proceed
                 </p>
@@ -382,7 +550,11 @@ export default function Evaluation() {
                 <div className="space-y-4">
                   <div>
                     <Label>Metadata Model</Label>
-                    <Select value={metadataModel} onValueChange={setMetadataModel} disabled={isProcessing}>
+                    <Select
+                      value={metadataModel}
+                      onValueChange={setMetadataModel}
+                      disabled={isProcessing}
+                    >
                       <SelectTrigger className="mt-1">
                         <SelectValue />
                       </SelectTrigger>
@@ -390,18 +562,34 @@ export default function Evaluation() {
                         <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                         <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
                         <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                        <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                        <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                        <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                        <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                        <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                        <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                        <SelectItem value="gpt-4.1-2025-04-14">
+                          GPT-4.1 (2025-04-14)
+                        </SelectItem>
+                        <SelectItem value="gpt-5-2025-08-07">
+                          GPT-5 (2025-08-07)
+                        </SelectItem>
+                        <SelectItem value="gpt-5.1-2025-11-13">
+                          GPT-5.1 (2025-11-13)
+                        </SelectItem>
+                        <SelectItem value="gpt-5-mini-2025-08-07">
+                          GPT-5 Mini (2025-08-07)
+                        </SelectItem>
+                        <SelectItem value="gpt-5.2-2025-12-11">
+                          GPT-5.2 (2025-12-11)
+                        </SelectItem>
+                        <SelectItem value="gpt-5.2-pro-2025-12-11">
+                          GPT-5.2 Pro (2025-12-11)
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
                     <Label>Debate Model</Label>
-                    <Select value={debateModel} onValueChange={setDebateModel} disabled={isProcessing}>
+                    <Select
+                      value={debateModel}
+                      onValueChange={setDebateModel}
+                      disabled={isProcessing}
+                    >
                       <SelectTrigger className="mt-1">
                         <SelectValue />
                       </SelectTrigger>
@@ -409,18 +597,32 @@ export default function Evaluation() {
                         <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                         <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
                         <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                        <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                        <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                        <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                        <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                        <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                        <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                        <SelectItem value="gpt-4.1-2025-04-14">
+                          GPT-4.1 (2025-04-14)
+                        </SelectItem>
+                        <SelectItem value="gpt-5-2025-08-07">
+                          GPT-5 (2025-08-07)
+                        </SelectItem>
+                        <SelectItem value="gpt-5.1-2025-11-13">
+                          GPT-5.1 (2025-11-13)
+                        </SelectItem>
+                        <SelectItem value="gpt-5-mini-2025-08-07">
+                          GPT-5 Mini (2025-08-07)
+                        </SelectItem>
+                        <SelectItem value="gpt-5.2-2025-12-11">
+                          GPT-5.2 (2025-12-11)
+                        </SelectItem>
+                        <SelectItem value="gpt-5.2-pro-2025-12-11">
+                          GPT-5.2 Pro (2025-12-11)
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div className="pt-2">
-                    <Label className="text-base font-semibold">Judge Panel Models</Label>
+                    <Label className="text-base font-semibold">
+                      Judge Panel Models
+                    </Label>
                     <p className="text-xs text-muted-foreground mt-1 mb-3">
                       Configure each of the 5 judges in the evaluation panel
                     </p>
@@ -430,7 +632,9 @@ export default function Evaluation() {
                         <Label className="text-sm">J1 - Methods Judge</Label>
                         <Select
                           value={judgeModels.J1}
-                          onValueChange={(v) => setJudgeModels({...judgeModels, J1: v})}
+                          onValueChange={(v) =>
+                            setJudgeModels({ ...judgeModels, J1: v })
+                          }
                           disabled={isProcessing}
                         >
                           <SelectTrigger className="mt-1">
@@ -438,14 +642,28 @@ export default function Evaluation() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                            <SelectItem value="gpt-4o-mini">
+                              GPT-4o Mini
+                            </SelectItem>
                             <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                            <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                            <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                            <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                            <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                            <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                            <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                            <SelectItem value="gpt-4.1-2025-04-14">
+                              GPT-4.1 (2025-04-14)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-2025-08-07">
+                              GPT-5 (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.1-2025-11-13">
+                              GPT-5.1 (2025-11-13)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-mini-2025-08-07">
+                              GPT-5 Mini (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-2025-12-11">
+                              GPT-5.2 (2025-12-11)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-pro-2025-12-11">
+                              GPT-5.2 Pro (2025-12-11)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -454,7 +672,9 @@ export default function Evaluation() {
                         <Label className="text-sm">J2 - Regulatory Judge</Label>
                         <Select
                           value={judgeModels.J2}
-                          onValueChange={(v) => setJudgeModels({...judgeModels, J2: v})}
+                          onValueChange={(v) =>
+                            setJudgeModels({ ...judgeModels, J2: v })
+                          }
                           disabled={isProcessing}
                         >
                           <SelectTrigger className="mt-1">
@@ -462,14 +682,28 @@ export default function Evaluation() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                            <SelectItem value="gpt-4o-mini">
+                              GPT-4o Mini
+                            </SelectItem>
                             <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                            <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                            <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                            <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                            <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                            <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                            <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                            <SelectItem value="gpt-4.1-2025-04-14">
+                              GPT-4.1 (2025-04-14)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-2025-08-07">
+                              GPT-5 (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.1-2025-11-13">
+                              GPT-5.1 (2025-11-13)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-mini-2025-08-07">
+                              GPT-5 Mini (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-2025-12-11">
+                              GPT-5.2 (2025-12-11)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-pro-2025-12-11">
+                              GPT-5.2 Pro (2025-12-11)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -478,7 +712,9 @@ export default function Evaluation() {
                         <Label className="text-sm">J3 - TechnoEcon Judge</Label>
                         <Select
                           value={judgeModels.J3}
-                          onValueChange={(v) => setJudgeModels({...judgeModels, J3: v})}
+                          onValueChange={(v) =>
+                            setJudgeModels({ ...judgeModels, J3: v })
+                          }
                           disabled={isProcessing}
                         >
                           <SelectTrigger className="mt-1">
@@ -486,23 +722,41 @@ export default function Evaluation() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                            <SelectItem value="gpt-4o-mini">
+                              GPT-4o Mini
+                            </SelectItem>
                             <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                            <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                            <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                            <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                            <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                            <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                            <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                            <SelectItem value="gpt-4.1-2025-04-14">
+                              GPT-4.1 (2025-04-14)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-2025-08-07">
+                              GPT-5 (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.1-2025-11-13">
+                              GPT-5.1 (2025-11-13)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-mini-2025-08-07">
+                              GPT-5 Mini (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-2025-12-11">
+                              GPT-5.2 (2025-12-11)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-pro-2025-12-11">
+                              GPT-5.2 Pro (2025-12-11)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
 
                       <div>
-                        <Label className="text-sm">J4 - Applicability Judge</Label>
+                        <Label className="text-sm">
+                          J4 - Applicability Judge
+                        </Label>
                         <Select
                           value={judgeModels.J4}
-                          onValueChange={(v) => setJudgeModels({...judgeModels, J4: v})}
+                          onValueChange={(v) =>
+                            setJudgeModels({ ...judgeModels, J4: v })
+                          }
                           disabled={isProcessing}
                         >
                           <SelectTrigger className="mt-1">
@@ -510,14 +764,28 @@ export default function Evaluation() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                            <SelectItem value="gpt-4o-mini">
+                              GPT-4o Mini
+                            </SelectItem>
                             <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                            <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                            <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                            <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                            <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                            <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                            <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                            <SelectItem value="gpt-4.1-2025-04-14">
+                              GPT-4.1 (2025-04-14)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-2025-08-07">
+                              GPT-5 (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.1-2025-11-13">
+                              GPT-5.1 (2025-11-13)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-mini-2025-08-07">
+                              GPT-5 Mini (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-2025-12-11">
+                              GPT-5.2 (2025-12-11)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-pro-2025-12-11">
+                              GPT-5.2 Pro (2025-12-11)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -526,7 +794,9 @@ export default function Evaluation() {
                         <Label className="text-sm">J5 - Skeptic Judge</Label>
                         <Select
                           value={judgeModels.J5}
-                          onValueChange={(v) => setJudgeModels({...judgeModels, J5: v})}
+                          onValueChange={(v) =>
+                            setJudgeModels({ ...judgeModels, J5: v })
+                          }
                           disabled={isProcessing}
                         >
                           <SelectTrigger className="mt-1">
@@ -534,14 +804,28 @@ export default function Evaluation() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                            <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                            <SelectItem value="gpt-4o-mini">
+                              GPT-4o Mini
+                            </SelectItem>
                             <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
-                            <SelectItem value="gpt-4.1-2025-04-14">GPT-4.1 (2025-04-14)</SelectItem>
-                            <SelectItem value="gpt-5-2025-08-07">GPT-5 (2025-08-07)</SelectItem>
-                            <SelectItem value="gpt-5.1-2025-11-13">GPT-5.1 (2025-11-13)</SelectItem>
-                            <SelectItem value="gpt-5-mini-2025-08-07">GPT-5 Mini (2025-08-07)</SelectItem>
-                            <SelectItem value="o3-2025-04-16">O3 (2025-04-16)</SelectItem>
-                            <SelectItem value="o4-mini-2025-04-16">O4 Mini (2025-04-16)</SelectItem>
+                            <SelectItem value="gpt-4.1-2025-04-14">
+                              GPT-4.1 (2025-04-14)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-2025-08-07">
+                              GPT-5 (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.1-2025-11-13">
+                              GPT-5.1 (2025-11-13)
+                            </SelectItem>
+                            <SelectItem value="gpt-5-mini-2025-08-07">
+                              GPT-5 Mini (2025-08-07)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-2025-12-11">
+                              GPT-5.2 (2025-12-11)
+                            </SelectItem>
+                            <SelectItem value="gpt-5.2-pro-2025-12-11">
+                              GPT-5.2 Pro (2025-12-11)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -562,8 +846,8 @@ export default function Evaluation() {
           )}
 
           {/* Evaluate Button */}
-          <Button 
-            className="w-full gap-2" 
+          <Button
+            className="w-full gap-2"
             size="lg"
             onClick={handleEvaluate}
             disabled={!canEvaluate}
@@ -576,45 +860,41 @@ export default function Evaluation() {
         {/* Right Column - Progress / Results */}
         <div>
           {isProcessing && (
-            <Card>
-              <CardContent className="pt-6">
-                {/* Pipeline checkpoint animation - temporarily disabled due to SSE issues
-                <PipelineProgress
-                  stages={stages}
-                  currentStage={currentStage}
-                  elapsedTime={elapsedTime}
-                />
-                */}
-                <div className="flex flex-col items-center justify-center space-y-4 py-12">
-                  <Loader2 className="h-16 w-16 animate-spin text-primary" />
-                  <div className="text-center">
-                    <h3 className="font-semibold text-lg">Evaluating Paper...</h3>
-                    <p className="text-sm text-muted-foreground mt-1">This may take a few minutes</p>
-                    <p className="text-sm text-muted-foreground font-mono mt-2">
-                      Elapsed: {Math.floor(elapsedTime / 60)}:{(elapsedTime % 60).toString().padStart(2, '0')}
-                    </p>
-                  </div>
-                </div>
+            <Card className="h-full min-h-[400px] flex items-center justify-center">
+              <CardContent className="text-center">
+                <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-primary" />
+                <p className="text-lg font-medium">Evaluating Paper...</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {elapsedTime > 0 &&
+                    `${Math.floor(elapsedTime / 60)}:${(elapsedTime % 60)
+                      .toString()
+                      .padStart(2, "0")}`}
+                </p>
               </CardContent>
             </Card>
-          )}
-          
-          {evaluationResult && !isProcessing && (
-            <EvaluationResults
-              result={normalizedResult || MOCK_RESULT}
-              metadata={normalizedMetadata || MOCK_METADATA}
-              debate={normalizedDebate || MOCK_DEBATE}
-            />
           )}
 
-          {!isProcessing && !evaluationResult && (
-            <Card className="h-full min-h-[400px] flex items-center justify-center">
-              <CardContent className="text-center text-muted-foreground">
-                <FileText className="h-16 w-16 mx-auto mb-4 opacity-20" />
-                <p>Upload a paper and start evaluation to see results here</p>
-              </CardContent>
-            </Card>
-          )}
+          {evaluationResult &&
+            !isProcessing &&
+            normalizedResult &&
+            normalizedMetadata && (
+              <EvaluationResults
+                result={normalizedResult}
+                metadata={normalizedMetadata}
+                debate={normalizedDebate || []}
+                docId={evaluationResult?.doc_id}
+              />
+            )}
+
+          {!isProcessing &&
+            (!evaluationResult || !normalizedResult || !normalizedMetadata) && (
+              <Card className="h-full min-h-[400px] flex items-center justify-center">
+                <CardContent className="text-center text-muted-foreground">
+                  <FileText className="h-16 w-16 mx-auto mb-4 opacity-20" />
+                  <p>Upload a paper and start evaluation to see results here</p>
+                </CardContent>
+              </Card>
+            )}
         </div>
       </div>
     </div>

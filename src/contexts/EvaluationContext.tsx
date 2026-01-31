@@ -34,12 +34,18 @@ export function EvaluationProvider({ children }: { children: ReactNode }) {
       const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          ...parsed,
-          elapsedTime: parsed.startedAt && parsed.isProcessing
-            ? Math.floor((Date.now() - parsed.startedAt) / 1000)
-            : parsed.elapsedTime || 0,
-        };
+        // Only restore state if there's an active job being processed
+        // Don't restore completed evaluations - user should start fresh
+        if (parsed.isProcessing && parsed.jobId) {
+          return {
+            ...parsed,
+            elapsedTime: parsed.startedAt
+              ? Math.floor((Date.now() - parsed.startedAt) / 1000)
+              : parsed.elapsedTime || 0,
+          };
+        }
+        // Clear stale sessionStorage
+        sessionStorage.removeItem(STORAGE_KEY);
       }
     } catch (e) {
       console.warn('Failed to load evaluation state from sessionStorage:', e);

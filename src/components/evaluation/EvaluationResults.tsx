@@ -6,14 +6,63 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Download, FileJson, FileText, Trophy, Scale, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api-client';
+import { toast } from '@/hooks/use-toast';
 
 interface EvaluationResultsProps {
   result: EvaluationResult;
   metadata: DocumentMetadata;
   debate: DebateResponse[];
+  docId?: string;
 }
 
-export default function EvaluationResults({ result, metadata, debate }: EvaluationResultsProps) {
+export default function EvaluationResults({ result, metadata, debate, docId }: EvaluationResultsProps) {
+  const handleDownloadPdf = async () => {
+    if (!docId) {
+      toast({ title: "Error", description: "Document ID not available", variant: "destructive" });
+      return;
+    }
+    try {
+      const blob = await apiClient.downloadReportPdf(docId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report_${docId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      toast({ title: "Download failed", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleDownloadDebateJson = () => {
+    const json = JSON.stringify(debate, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `debate_${docId || 'results'}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadEvaluationJson = () => {
+    const json = JSON.stringify(result, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `evaluation_${docId || 'results'}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const getRelevanceColor = (relevance: string) => {
     switch (relevance) {
       case 'RELEVANT': return 'bg-primary text-primary-foreground';
@@ -215,15 +264,15 @@ export default function EvaluationResults({ result, metadata, debate }: Evaluati
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
-            <Button variant="outline" className="gap-2">
+            <Button variant="outline" className="gap-2" onClick={handleDownloadDebateJson}>
               <FileJson className="h-4 w-4" />
               Debate JSON
             </Button>
-            <Button variant="outline" className="gap-2">
+            <Button variant="outline" className="gap-2" onClick={handleDownloadEvaluationJson}>
               <FileJson className="h-4 w-4" />
               Evaluation JSON
             </Button>
-            <Button variant="outline" className="gap-2">
+            <Button variant="outline" className="gap-2" onClick={handleDownloadPdf} disabled={!docId}>
               <FileText className="h-4 w-4" />
               PDF Report
             </Button>

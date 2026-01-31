@@ -35,6 +35,7 @@ export function usePipelineStream(jobId: string | null) {
   const isCompleteRef = useRef(false);
   const currentStageRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
+  const lastEventTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
     if (!jobId) {
@@ -46,6 +47,7 @@ export function usePipelineStream(jobId: string | null) {
       currentStageRef.current = 0;
       setError(null);
       setResult(null);
+      lastEventTimeRef.current = Date.now();
       return;
     }
 
@@ -81,6 +83,7 @@ export function usePipelineStream(jobId: string | null) {
       try {
         const data = JSON.parse(event.data);
         console.log('[SSE] stage_update:', data);
+        lastEventTimeRef.current = Date.now();
         const stage = data.stage;
         const progress = data.progress;
 
@@ -176,6 +179,21 @@ export function usePipelineStream(jobId: string | null) {
       }, 3000);
     };
 
+    // Periodic check: if no events received in 30 seconds, start polling
+    const stallenessCheckInterval = setInterval(() => {
+      if (isCompleteRef.current) {
+        clearInterval(stallenessCheckInterval);
+        return;
+      }
+
+      const timeSinceLastEvent = Date.now() - lastEventTimeRef.current;
+      if (timeSinceLastEvent > 30000) { // 30 seconds without events
+        console.log('[SSE] No events for 30s, starting fallback polling');
+        startPolling();
+        clearInterval(stallenessCheckInterval);
+      }
+    }, 10000); // Check every 10 seconds
+
     eventSource.onerror = (event) => {
       // EventSource fires "error" on normal close as well; ignore closed streams.
       if (eventSource.readyState === EventSource.CLOSED) {
@@ -210,6 +228,7 @@ export function usePipelineStream(jobId: string | null) {
 
     return () => {
       eventSource.close();
+      clearInterval(stallenessCheckInterval);
       if (pollTimerRef.current) {
         window.clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;

@@ -25,7 +25,7 @@ FROM nginx:alpine
 # Copy built assets
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy nginx config for SPA routing
+# Copy nginx config for SPA routing and port 8080
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port 8080 (Cloud Run default)
