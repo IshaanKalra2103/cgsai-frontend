@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -25,17 +25,12 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "@/hooks/use-toast";
 import EvaluationResults from "@/components/evaluation/EvaluationResults";
+import PipelineProgress from "@/components/evaluation/PipelineProgress";
 import { RelevanceStatus, DocumentMetadata, DebateResponse } from "@/types";
-import {
-  Upload,
-  Play,
-  Settings2,
-  AlertTriangle,
-  FileText,
-  Loader2,
-} from "lucide-react";
+import { Upload, Play, Settings2, AlertTriangle, FileText } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { useEvaluation } from "@/contexts/EvaluationContext";
+import { usePipelineStream } from "@/hooks/usePipelineStream";
 
 const DEFAULT_RESEARCH_QUESTION = `Methane is a potent greenhouse gas and is emitted from oil and gas, coal, rice cultivation, enteric fermentation, manure, and waste sectors. We are interested in strategies/technologies to reduce its emissions. Does the paper discuss methods or technologies to mitigate methane emissions from any one of the sectors?`;
 
@@ -68,10 +63,10 @@ const normalizeDebate = (debate: any): DebateResponse[] => {
     // Extract pro and con arguments from agent_responses
     const agentResponses = item?.agent_responses || [];
     const proResponse = agentResponses.find((r: any) =>
-      r?.agent_name?.toLowerCase().includes("pro"),
+      r?.agent_name?.toLowerCase().includes("pro")
     );
     const conResponse = agentResponses.find((r: any) =>
-      r?.agent_name?.toLowerCase().includes("con"),
+      r?.agent_name?.toLowerCase().includes("con")
     );
 
     return {
@@ -88,13 +83,13 @@ const normalizeEvaluation = (evaluation: any) => ({
   id: evaluation?.id || evaluation?.job_id || "unknown",
   documentId: evaluation?.document_id || evaluation?.doc_id || "",
   overallRelevance: normalizeRelevance(
-    evaluation?.overall_relevance || evaluation?.overallRelevance,
+    evaluation?.overall_relevance || evaluation?.overallRelevance
   ),
   avgProScore: Number(
-    evaluation?.avg_pro_score ?? evaluation?.avgProScore ?? 0,
+    evaluation?.avg_pro_score ?? evaluation?.avgProScore ?? 0
   ),
   avgConScore: Number(
-    evaluation?.avg_con_score ?? evaluation?.avgConScore ?? 0,
+    evaluation?.avg_con_score ?? evaluation?.avgConScore ?? 0
   ),
   proWins: Number(evaluation?.pro_wins ?? evaluation?.proWins ?? 0),
   conWins: Number(evaluation?.con_wins ?? evaluation?.conWins ?? 0),
@@ -258,7 +253,7 @@ export default function Evaluation() {
   const [groundTruth, setGroundTruth] =
     useState<RelevanceStatus>("NOT_SPECIFIED");
   const [researchQuestion, setResearchQuestion] = useState(
-    DEFAULT_RESEARCH_QUESTION,
+    DEFAULT_RESEARCH_QUESTION
   );
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
@@ -271,6 +266,65 @@ export default function Evaluation() {
     setProcessing,
   } = useEvaluation();
   const { jobId, isProcessing, elapsedTime, evaluationResult } = evalState;
+
+  // SSE hook for real-time pipeline progress
+  console.log("[Evaluation] Calling usePipelineStream with jobId:", jobId);
+  const {
+    stages: pipelineStages,
+    currentStage,
+    isComplete: sseComplete,
+    error: sseError,
+    result: sseResult,
+  } = usePipelineStream(jobId);
+
+  console.log("[Evaluation] SSE hook state:", {
+    stagesCount: pipelineStages.length,
+    currentStage,
+    sseComplete,
+    sseError: !!sseError,
+    hasResult: !!sseResult,
+  });
+
+  // Handle SSE completion - fetch full results when pipeline completes
+  useEffect(() => {
+    if (sseComplete && jobId && isProcessing) {
+      console.log("[SSE] Pipeline complete, fetching full results...");
+
+      // Fetch the full results from the API
+      apiClient
+        .getResults(jobId)
+        .then((results: any) => {
+          console.log("📊 Full results fetched:", results);
+          if (results.status === "completed") {
+            setResult(results);
+            toast({
+              title: "Evaluation complete",
+              description: "The paper has been successfully evaluated.",
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to fetch results after SSE complete:", err);
+          // SSE result might have the data we need
+          if (sseResult) {
+            setResult(sseResult);
+          }
+        });
+    }
+  }, [sseComplete, jobId, isProcessing, sseResult, setResult]);
+
+  // Handle SSE errors
+  useEffect(() => {
+    if (sseError && isProcessing) {
+      console.error("[SSE] Pipeline error:", sseError);
+      setProcessing(false);
+      toast({
+        title: "Evaluation failed",
+        description: sseError,
+        variant: "destructive",
+      });
+    }
+  }, [sseError, isProcessing, setProcessing]);
 
   // Debug: Log when evaluation result changes
   useEffect(() => {
@@ -290,9 +344,6 @@ export default function Evaluation() {
     J5: "gpt-5.2-2025-12-11",
   });
 
-  // Ref to track if evaluation was cancelled
-  const cancelledRef = useRef(false);
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
@@ -306,8 +357,7 @@ export default function Evaluation() {
       }
       setFile(selectedFile);
       setDuplicateWarning(null);
-      cancelledRef.current = true; // Cancel any ongoing evaluation
-      clearEvaluation();
+      clearEvaluation(); // This sets jobId to null, which triggers SSE cleanup
     }
   };
 
@@ -316,7 +366,6 @@ export default function Evaluation() {
 
     setDuplicateWarning(null);
     clearEvaluation();
-    cancelledRef.current = false;
 
     try {
       // Create FormData for file upload
@@ -338,7 +387,7 @@ export default function Evaluation() {
             `Previous evaluation: ${
               uploadResponse.existing_doc?.title || "Unknown"
             }. ` +
-            `To re-run with new prompts, use the prompt re-evaluation section.`,
+            `To re-run with new prompts, use the prompt re-evaluation section.`
         );
         return;
       }
@@ -351,57 +400,10 @@ export default function Evaluation() {
 
       toast({
         title: "Pipeline started",
-        description: "Waiting for evaluation to complete...",
+        description: "Real-time progress will be streamed via SSE.",
       });
 
-      // Wait for results with simple retry loop
-      const RETRY_INTERVAL = 3000; // 3 seconds between retries
-      const MAX_RETRIES = 200; // ~10 minutes max wait
-      let retries = 0;
-
-      while (retries < MAX_RETRIES && !cancelledRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL));
-
-        if (cancelledRef.current) break;
-
-        try {
-          const results: any = await apiClient.getResults(uploadResponse.job_id);
-
-          console.log("📊 Results received:", results);
-          console.log("📊 Results status:", results.status);
-          console.log("📊 Results metadata:", results.metadata);
-          console.log("📊 Results evaluation:", results.evaluation);
-          console.log("📊 Results debate:", results.debate);
-
-          if (results.status === "completed") {
-            // Got results - update state and show success
-            console.log("✅ Setting result in context");
-            setResult(results);
-            toast({
-              title: "Evaluation complete",
-              description: "The paper has been successfully evaluated.",
-            });
-            return;
-          } else if (results.status === "failed") {
-            throw new Error(results.error || "Pipeline failed");
-          }
-          // Status is "running" - continue waiting
-        } catch (err: any) {
-          // If it's a 500 error with "Pipeline failed", propagate it
-          if (err.message?.includes("Pipeline failed")) {
-            throw err;
-          }
-          // Otherwise log and continue retrying (might be transient)
-          console.warn("Error fetching results, retrying...", err);
-        }
-
-        retries++;
-      }
-
-      // If we exit the loop without results
-      if (!cancelledRef.current) {
-        throw new Error("Evaluation timed out. Please check the results later.");
-      }
+      // SSE hook will handle the rest - completion and errors are handled by useEffect hooks above
     } catch (error: any) {
       setProcessing(false);
       toast({
@@ -860,16 +862,19 @@ export default function Evaluation() {
         {/* Right Column - Progress / Results */}
         <div>
           {isProcessing && (
-            <Card className="h-full min-h-[400px] flex items-center justify-center">
-              <CardContent className="text-center">
-                <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-primary" />
-                <p className="text-lg font-medium">Evaluating Paper...</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {elapsedTime > 0 &&
-                    `${Math.floor(elapsedTime / 60)}:${(elapsedTime % 60)
-                      .toString()
-                      .padStart(2, "0")}`}
-                </p>
+            <Card className="h-full min-h-[400px]">
+              <CardHeader>
+                <CardTitle>Evaluation Progress</CardTitle>
+                <CardDescription>
+                  Real-time pipeline status via Server-Sent Events
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PipelineProgress
+                  stages={pipelineStages}
+                  currentStage={currentStage}
+                  elapsedTime={elapsedTime}
+                />
               </CardContent>
             </Card>
           )}
