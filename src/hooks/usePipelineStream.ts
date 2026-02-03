@@ -55,22 +55,16 @@ export function usePipelineStream(jobId: string | null) {
   }, []);
 
   useEffect(() => {
-    console.log("[SSE] useEffect triggered, jobId:", jobId);
-
     if (!jobId) {
-      console.log("[SSE] No jobId, resetting state");
       resetState();
       return;
     }
 
     const token = localStorage.getItem("cgsai_token");
     if (!token) {
-      console.error("[SSE] No auth token found");
       setError("Authentication required");
       return;
     }
-
-    console.log("[SSE] Starting stream for job:", jobId);
 
     // Create abort controller for cleanup
     const abortController = new AbortController();
@@ -92,7 +86,6 @@ export function usePipelineStream(jobId: string | null) {
 
           onopen: async (response) => {
             if (response.ok) {
-              console.log("[SSE] Connection opened");
               return;
             }
 
@@ -108,34 +101,17 @@ export function usePipelineStream(jobId: string | null) {
           },
 
           onmessage: (event) => {
-            // Debug: log all incoming events
-            console.log("[SSE] Raw event received:", {
-              event: event.event,
-              data: event.data?.substring(0, 100),
-              id: event.id,
-            });
-
             // Skip heartbeats and empty events
-            // Heartbeats come through as comments (": heartbeat") or empty event types
             if (!event.data || event.data.startsWith(":")) {
-              console.log("[SSE] Skipping heartbeat/empty event");
               return;
-            }
-
-            // If no event type, try to parse and handle anyway
-            if (!event.event) {
-              console.log("[SSE] Event has no type, attempting to parse data");
             }
 
             try {
               const data = JSON.parse(event.data);
-              const eventType = event.event || data.event; // Fallback to data.event if event.event is empty
-
-              console.log("[SSE] Parsed event:", { type: eventType, data });
+              const eventType = event.event || data.event;
 
               switch (eventType) {
                 case "stage_update": {
-                  console.log("[SSE] Processing stage_update:", data);
                   const stage = data.stage;
                   const progress = data.progress;
 
@@ -161,15 +137,11 @@ export function usePipelineStream(jobId: string | null) {
                 }
 
                 case "complete": {
-                  console.log("[SSE] complete:", data);
                   setIsComplete(true);
                   isCompleteRef.current = true;
 
                   if (data.result) {
-                    console.log("[SSE] Setting result:", data.result);
                     setResult(data.result);
-                  } else {
-                    console.warn("[SSE] Complete event has no result data");
                   }
 
                   // Mark all stages as completed
@@ -183,7 +155,6 @@ export function usePipelineStream(jobId: string | null) {
                 }
 
                 case "pipeline_error": {
-                  console.error("[SSE] pipeline_error:", data);
                   setError(data.error || "Pipeline failed");
                   hasErrorRef.current = true;
 
@@ -202,15 +173,10 @@ export function usePipelineStream(jobId: string | null) {
                 }
 
                 default:
-                  console.log(
-                    "[SSE] Unknown event type:",
-                    eventType,
-                    "data:",
-                    data
-                  );
+                  break;
               }
-            } catch (err) {
-              console.error("[SSE] Error parsing event data:", err, event);
+            } catch {
+              // Ignore parse errors for malformed events
             }
           },
 
@@ -230,31 +196,19 @@ export function usePipelineStream(jobId: string | null) {
               throw err; // Stop retrying
             }
 
-            // Log and let fetch-event-source retry
-            console.error("[SSE] Connection error, will retry:", err);
-            // Return undefined to allow retry with default backoff
+            // Return undefined to allow fetch-event-source to retry
           },
 
-          onclose: () => {
-            console.log("[SSE] Connection closed");
-            // If we're not complete and no error, this might be unexpected
-            if (!isCompleteRef.current && !hasErrorRef.current) {
-              console.warn("[SSE] Connection closed unexpectedly");
-            }
-          },
+          onclose: () => {},
         });
       } catch (err) {
-        // Handle fatal errors or aborted requests
         if (err instanceof FatalError) {
-          console.log("[SSE] Stream stopped:", err.message);
+          // Expected stop
         } else if (err instanceof DOMException && err.name === "AbortError") {
-          console.log("[SSE] Stream aborted");
-        } else {
-          console.error("[SSE] Unexpected error:", err);
-          if (!isCompleteRef.current && !hasErrorRef.current) {
-            setError(err instanceof Error ? err.message : "Connection failed");
-            hasErrorRef.current = true;
-          }
+          // Expected abort on cleanup
+        } else if (!isCompleteRef.current && !hasErrorRef.current) {
+          setError(err instanceof Error ? err.message : "Connection failed");
+          hasErrorRef.current = true;
         }
       }
     };
@@ -263,7 +217,6 @@ export function usePipelineStream(jobId: string | null) {
 
     // Cleanup on unmount or jobId change
     return () => {
-      console.log("[SSE] Cleaning up stream");
       abortController.abort();
       abortControllerRef.current = null;
     };

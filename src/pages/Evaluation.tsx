@@ -268,7 +268,6 @@ export default function Evaluation() {
   const { jobId, isProcessing, elapsedTime, evaluationResult } = evalState;
 
   // SSE hook for real-time pipeline progress
-  console.log("[Evaluation] Calling usePipelineStream with jobId:", jobId);
   const {
     stages: pipelineStages,
     currentStage,
@@ -277,24 +276,12 @@ export default function Evaluation() {
     result: sseResult,
   } = usePipelineStream(jobId);
 
-  console.log("[Evaluation] SSE hook state:", {
-    stagesCount: pipelineStages.length,
-    currentStage,
-    sseComplete,
-    sseError: !!sseError,
-    hasResult: !!sseResult,
-  });
-
   // Handle SSE completion - fetch full results when pipeline completes
   useEffect(() => {
     if (sseComplete && jobId && isProcessing) {
-      console.log("[SSE] Pipeline complete, fetching full results...");
-
-      // Fetch the full results from the API
       apiClient
         .getResults(jobId)
         .then((results: any) => {
-          console.log("📊 Full results fetched:", results);
           if (results.status === "completed") {
             setResult(results);
             toast({
@@ -303,9 +290,7 @@ export default function Evaluation() {
             });
           }
         })
-        .catch((err) => {
-          console.error("Failed to fetch results after SSE complete:", err);
-          // SSE result might have the data we need
+        .catch(() => {
           if (sseResult) {
             setResult(sseResult);
           }
@@ -316,7 +301,6 @@ export default function Evaluation() {
   // Handle SSE errors
   useEffect(() => {
     if (sseError && isProcessing) {
-      console.error("[SSE] Pipeline error:", sseError);
       setProcessing(false);
       toast({
         title: "Evaluation failed",
@@ -325,13 +309,6 @@ export default function Evaluation() {
       });
     }
   }, [sseError, isProcessing, setProcessing]);
-
-  // Debug: Log when evaluation result changes
-  useEffect(() => {
-    console.log("🎯 Evaluation Result Changed:", evaluationResult);
-    console.log("🎯 Is Processing:", isProcessing);
-    console.log("🎯 Job ID:", jobId);
-  }, [evaluationResult, isProcessing, jobId]);
 
   // Model configurations
   const [metadataModel, setMetadataModel] = useState("gpt-4o-mini");
@@ -425,12 +402,6 @@ export default function Evaluation() {
   const normalizedDebate = evaluationResult?.debate
     ? normalizeDebate(evaluationResult.debate)
     : null;
-
-  console.log("🔍 Normalized Result:", normalizedResult);
-  console.log("🔍 Normalized Metadata:", normalizedMetadata);
-  console.log("🔍 Normalized Debate:", normalizedDebate);
-  console.log("🔍 Evaluation Result:", evaluationResult);
-  console.log("🔍 Is Processing:", isProcessing);
 
   return (
     <div className="space-y-6">
